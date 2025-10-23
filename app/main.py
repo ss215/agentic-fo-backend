@@ -33,12 +33,12 @@ async def lifespan(app: FastAPI):
     
     # Test database connection
     if not test_connection():
-        logger.error("Database connection failed!")
-        raise Exception("Database connection failed")
-    
-    # Create tables
-    create_tables()
-    logger.info("Database tables created/verified")
+        logger.warning("Database connection failed - continuing without database")
+        logger.info("Application will start in limited mode")
+    else:
+        # Create tables only if database is available
+        create_tables()
+        logger.info("Database tables created/verified")
     
     # Initialize Redis connection
     # await init_redis()

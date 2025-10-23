@@ -3,7 +3,7 @@ Pydantic models for trading operations
 Type-safe data models with validation
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -141,6 +141,8 @@ class RiskMetrics(BaseModel):
 
 class SystemHealth(BaseModel):
     """System health status"""
+    model_config = ConfigDict(protected_namespaces=())
+    
     status: str
     timestamp: datetime
     database_health: str

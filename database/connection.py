@@ -4,7 +4,7 @@ Production-ready database configuration
 """
 
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
@@ -73,7 +73,7 @@ def test_connection():
     """Test database connection"""
     try:
         with get_db_session() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         logging.info("Database connection successful")
         return True
     except Exception as e:
@@ -85,7 +85,7 @@ def get_db_health():
     """Get database health status"""
     try:
         with get_db_session() as db:
-            result = db.execute("SELECT version()").fetchone()
+            result = db.execute(text("SELECT version()")).fetchone()
             return {
                 "status": "healthy",
                 "database": "postgresql",

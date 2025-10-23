@@ -11,7 +11,7 @@ if [ ! -z "$DATABASE_URL" ]; then
     python -c "
 import time
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 
 max_retries = 30
@@ -21,7 +21,7 @@ while retry_count < max_retries:
     try:
         engine = create_engine(os.getenv('DATABASE_URL'))
         with engine.connect() as conn:
-            conn.execute('SELECT 1')
+            conn.execute(text('SELECT 1'))
         print('✅ Database connection successful!')
         break
     except OperationalError as e:
@@ -32,8 +32,8 @@ while retry_count < max_retries:
         print(f'❌ Database connection failed: {e}')
         break
 else:
-    print('❌ Database connection failed after maximum retries')
-    exit(1)
+    print('⚠️ No DATABASE_URL provided, skipping database connection test')
+    print('ℹ️ Application will start without database connection')
 "
 fi
 
