@@ -28,19 +28,27 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
+# Create non-root user first
+RUN useradd --create-home --shell /bin/bash agentic
 
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
+# Copy Python packages from builder to user's home directory
+COPY --from=builder /root/.local /home/agentic/.local
+
+# Make sure scripts in .local are usable and owned by agentic user
+RUN chown -R agentic:agentic /home/agentic/.local
+ENV PATH=/home/agentic/.local/bin:$PATH
 
 # Copy application code
 COPY . .
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash agentic
+# Change ownership of app directory
 RUN chown -R agentic:agentic /app
+
+# Switch to non-root user
 USER agentic
+
+# Set working directory to app
+WORKDIR /app
 
 # Expose port
 EXPOSE 8000
