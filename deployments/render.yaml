@@ -1,0 +1,35 @@
+# Render.com deployment configuration
+# Deploy to: https://render.com
+
+services:
+  - type: web
+    name: agentic-fo-backend
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: |
+      pip install -r requirements.txt
+      python -c "from database.connection import create_tables; create_tables()"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agentic-fo-db
+          property: connectionString
+      - key: REDIS_URL
+        value: redis://localhost:6379/0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGO_ID
+        value: AGENTIC_FO_001
+      - key: STRATEGY_NAME
+        value: AgenticF&OStrategy
+      - key: ALLOWED_ORIGINS
+        value: https://chrome.google.com,chrome-extension://*
+      - key: ALLOWED_HOSTS
+        value: *.onrender.com
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: main
