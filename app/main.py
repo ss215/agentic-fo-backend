@@ -14,7 +14,8 @@ from datetime import datetime
 
 from database.connection import get_db, create_tables, test_connection
 from app.routes import auth, trading, monitoring, admin
-from app.middleware import LoggingMiddleware, RateLimitMiddleware
+from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.rate_limit_middleware import RateLimitMiddleware
 from app.core.config import settings
 
 # Configure logging
