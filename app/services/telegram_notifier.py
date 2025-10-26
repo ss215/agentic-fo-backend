@@ -7,7 +7,7 @@ import requests
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
-from app.services.breakdown_detector import BreakdownAlert
+# Import handled dynamically
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class TelegramNotifier:
             logger.error(f"Error sending Telegram notification: {e}")
             return False
     
-    def send_breakdown_alert(self, alert: BreakdownAlert) -> bool:
+    def send_breakdown_alert(self, alert) -> bool:
         """Send breakdown alert to Telegram"""
         if not self.api_url or not self.chat_id:
             logger.warning("Telegram not configured, skipping breakdown alert")
@@ -61,7 +61,16 @@ class TelegramNotifier:
         
         return self.send_message(message)
     
-    def _format_breakdown_alert(self, alert: BreakdownAlert) -> str:
+    def send_breakout_failure_alert(self, alert) -> bool:
+        """Send breakout failure alert to Telegram"""
+        if not self.api_url or not self.chat_id:
+            logger.warning("Telegram not configured, skipping breakout failure alert")
+            return False
+        
+        message = self._format_breakout_failure_alert(alert)
+        return self.send_message(message)
+    
+    def _format_breakdown_alert(self, alert) -> str:
         """Format breakdown alert as Telegram message"""
         
         # Calculate percentage drop
@@ -81,6 +90,38 @@ class TelegramNotifier:
 • Time: {alert.breakdown_time.strftime('%Y-%m-%d %H:%M:%S')}
 
 _Price has broken below key support level!_"""
+        
+        return message
+    
+    def _format_breakout_failure_alert(self, alert) -> str:
+        """Format breakout failure alert as Telegram message"""
+        
+        percentage_drop = ((alert.breakdown_price - alert.breakout_price) / alert.breakout_price) * 100
+        
+        swing_low_msg = ""
+        if alert.swing_low_broken:
+            swing_low_msg = f"\n🔴 *SWING LOW BROKEN:* {alert.previous_swing_low:.2f}"
+        
+        message = f"""🚨 *BREAKOUT FAILURE DETECTED*
+
+*Instrument:* `{alert.instrument}`
+
+*Range:*
+• Upper: ₹{alert.range_upper:.2f}
+• Lower: ₹{alert.range_lower:.2f}
+
+*Breakout & Breakdown:*
+• Breakout Price: ₹{alert.breakout_price:.2f}
+• Breakdown Price: ₹{alert.breakdown_price:.2f}
+• Drop: {percentage_drop:.2f}%
+{swing_low_msg}
+
+*Details:*
+• Candles to Fail: {alert.candles_for_failure}
+• Volume Spike: {alert.volume_spike:.1f}%
+• Time: {alert.breakdown_time.strftime('%Y-%m-%d %H:%M:%S')}
+
+_Price broke out of range but immediately failed and broke down!_"""
         
         return message
     
