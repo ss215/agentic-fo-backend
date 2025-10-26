@@ -13,7 +13,7 @@ import os
 from datetime import datetime
 
 from database.connection import get_db, create_tables, test_connection
-from app.routes import auth, trading, monitoring, admin
+from app.routes import auth, trading, monitoring, admin, breakdown_monitor
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.rate_limit_middleware import RateLimitMiddleware
 from app.core.config import settings
@@ -87,6 +87,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["Monitoring"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(breakdown_monitor.router, tags=["Breakdown Monitor"])
 
 @app.get("/")
 async def root():
