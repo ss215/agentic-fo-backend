@@ -96,13 +96,23 @@ _Price has broken below key support level!_"""
     def _format_breakout_failure_alert(self, alert) -> str:
         """Format breakout failure alert as Telegram message"""
         
-        percentage_drop = ((alert.breakdown_price - alert.breakout_price) / alert.breakout_price) * 100
+        # Calculate percentage change
+        if alert.direction == "up_failure":
+            percentage_change = ((alert.breakdown_price - alert.breakout_price) / alert.breakout_price) * 100
+            signal = "SELL" if alert.swing_low_broken else "WATCH"
+            direction_emoji = "🔴"
+        else:
+            percentage_change = ((alert.breakdown_price - alert.breakout_price) / alert.breakout_price) * 100
+            signal = "BUY" if alert.swing_high_broken else "WATCH"
+            direction_emoji = "🟢"
         
-        swing_low_msg = ""
+        swing_msg = ""
         if alert.swing_low_broken:
-            swing_low_msg = f"\n🔴 *SWING LOW BROKEN:* {alert.previous_swing_low:.2f}"
+            swing_msg = f"\n🔴 *SWING LOW BROKEN:* ₹{alert.previous_swing_low:.2f}"
+        elif alert.swing_high_broken:
+            swing_msg = f"\n🟢 *SWING HIGH BROKEN:* ₹{alert.previous_swing_high:.2f}"
         
-        message = f"""🚨 *BREAKOUT FAILURE DETECTED*
+        message = f"""{direction_emoji} *BREAKOUT FAILURE DETECTED* ({alert.direction})
 
 *Instrument:* `{alert.instrument}`
 
@@ -113,15 +123,16 @@ _Price has broken below key support level!_"""
 *Breakout & Breakdown:*
 • Breakout Price: ₹{alert.breakout_price:.2f}
 • Breakdown Price: ₹{alert.breakdown_price:.2f}
-• Drop: {percentage_drop:.2f}%
-{swing_low_msg}
+• Change: {percentage_change:.2f}%
+{swing_msg}
 
 *Details:*
 • Candles to Fail: {alert.candles_for_failure}
 • Volume Spike: {alert.volume_spike:.1f}%
 • Time: {alert.breakdown_time.strftime('%Y-%m-%d %H:%M:%S')}
+• Signal: {signal}
 
-_Price broke out of range but immediately failed and broke down!_"""
+_Price broke out but immediately reversed!_"""
         
         return message
     

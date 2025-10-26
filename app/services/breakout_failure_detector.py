@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 class BreakoutPhase(str, Enum):
     """Breakout detection phases"""
     CONSOLIDATION = "consolidation"  # Range-bound period
-    BREAKOUT = "breakout"  # Price breaks above range
-    BREAKOUT_FAILURE = "breakout_failure"  # Price breaks down after breakout
+    BREAKOUT_UP = "breakout_up"  # Price breaks above range
+    BREAKOUT_DOWN = "breakout_down"  # Price breaks below range
+    BREAKOUT_FAILURE_UP = "breakout_failure_up"  # Price breaks down after upside breakout
+    BREAKOUT_FAILURE_DOWN = "breakout_failure_down"  # Price breaks up after downside breakout
     SWING_LOW_BROKEN = "swing_low_broken"  # Price breaks previous swing low
+    SWING_HIGH_BROKEN = "swing_high_broken"  # Price breaks previous swing high
 
 
 @dataclass
@@ -39,6 +42,14 @@ class SwingLow:
 
 
 @dataclass
+class SwingHigh:
+    """Previous swing high"""
+    price: float
+    time: datetime
+    is_broken: bool = False
+
+
+@dataclass
 class BreakoutFailureAlert:
     """Breakout failure alert"""
     instrument: str
@@ -47,10 +58,13 @@ class BreakoutFailureAlert:
     breakout_price: float
     breakdown_price: float
     previous_swing_low: float
+    previous_swing_high: float
     swing_low_broken: bool
+    swing_high_broken: bool
     breakdown_time: datetime
     candles_for_failure: int  # How many candles it took to fail
     volume_spike: float
+    direction: str  # "up_failure" or "down_failure"
 
 
 class BreakoutFailureDetector:
@@ -59,7 +73,9 @@ class BreakoutFailureDetector:
     def __init__(self):
         self.range_levels: Dict[str, RangeLevel] = {}
         self.swing_lows: Dict[str, SwingLow] = {}
+        self.swing_highs: Dict[str, SwingHigh] = {}
         self.breakout_prices: Dict[str, float] = {}
+        self.breakout_direction: Dict[str, str] = {}  # "up" or "down"
         self.price_history: Dict[str, List[Dict[str, Any]]] = {}
         self.failure_history: Dict[str, List[BreakoutFailureAlert]] = {}
         self.current_phase: Dict[str, BreakoutPhase] = {}
@@ -119,7 +135,7 @@ class BreakoutFailureDetector:
     def detect_breakout(self, instrument: str, current_candle: Dict[str, Any], 
                        range_level: RangeLevel) -> bool:
         """
-        Detect if price has broken out of the range
+        Detect if price has broken out of the range (up or down)
         
         Args:
             instrument: Instrument symbol
@@ -131,14 +147,27 @@ class BreakoutFailureDetector:
         """
         close_price = current_candle.get('close', 0)
         high_price = current_candle.get('high', 0)
+        low_price = current_candle.get('low', 0)
         
-        # Check if price has broken above upper bound
+        # Check for upside breakout (above upper bound)
         if high_price > range_level.upper_bound:
             range_level.end_time = current_candle.get('timestamp', datetime.now())
             self.breakout_prices[instrument] = close_price
-            self.current_phase[instrument] = BreakoutPhase.BREAKOUT
+            self.breakout_direction[instrument] = "up"
+            self.current_phase[instrument] = BreakoutPhase.BREAKOUT_UP
             
-            logger.warning(f"🟢 BREAKOUT: {instrument} broke above {range_level.upper_bound:.2f} at {close_price:.2f}")
+            logger.warning(f"🟢 UPWARD BREAKOUT: {instrument} broke above {range_level.upper_bound:.2f} at {close_price:.2f}")
+            
+            return True
+        
+        # Check for downside breakout (below lower bound)
+        if low_price < range_level.lower_bound:
+            range_level.end_time = current_candle.get('timestamp', datetime.now())
+            self.breakout_prices[instrument] = close_price
+            self.breakout_direction[instrument] = "down"
+            self.current_phase[instrument] = BreakoutPhase.BREAKOUT_DOWN
+            
+            logger.warning(f"🔴 DOWNWARD BREAKOUT: {instrument} broke below {range_level.lower_bound:.2f} at {close_price:.2f}")
             
             return True
         
@@ -149,7 +178,9 @@ class BreakoutFailureDetector:
         """
         Detect if price has broken down after breakout (breakout failure)
         
-        This is the key pattern: Breakout → Immediate Breakdown
+        Handles both patterns:
+        - Upward breakout → falls back down (up_failure)
+        - Downward breakout → rises back up (down_failure)
         
         Args:
             instrument: Instrument symbol
@@ -164,10 +195,20 @@ class BreakoutFailureDetector:
         
         close_price = current_candle.get('close', 0)
         low_price = current_candle.get('low', 0)
+        high_price = current_candle.get('high', 0)
         volume = current_candle.get('volume', 0)
+        direction = self.breakout_direction.get(instrument, "up")
         
-        # Check if price has fallen back below the range upper bound
-        if close_price < range_level.upper_bound:
+        # For UPWARD breakout: check if price has fallen back below range upper bound
+        # For DOWNWARD breakout: check if price has risen back above range lower bound
+        is_failure = False
+        
+        if direction == "up" and close_price < range_level.upper_bound:
+            is_failure = True
+        elif direction == "down" and close_price > range_level.lower_bound:
+            is_failure = True
+        
+        if is_failure:
             
             # This is a breakout failure!
             range_level.end_time = current_candle.get('timestamp', datetime.now())
@@ -183,17 +224,30 @@ class BreakoutFailureDetector:
             else:
                 volume_spike = 0
             
-            # Check if it broke previous swing low
+            # Check if it broke previous swing low (for up failures) or swing high (for down failures)
             swing_low_broken = False
+            swing_high_broken = False
             previous_swing_low = 0
+            previous_swing_high = 0
             
-            if instrument in self.swing_lows:
-                swing_low = self.swing_lows[instrument]
-                if close_price < swing_low.price:
-                    swing_low.is_broken = True
-                    swing_low_broken = True
-                    previous_swing_low = swing_low.price
-                    logger.error(f"🔴 SWING LOW BROKEN: Price {close_price:.2f} below swing low {swing_low.price:.2f}")
+            if direction == "up":
+                # Upward breakout failure - check if swing low broken
+                if instrument in self.swing_lows:
+                    swing_low = self.swing_lows[instrument]
+                    if close_price < swing_low.price:
+                        swing_low.is_broken = True
+                        swing_low_broken = True
+                        previous_swing_low = swing_low.price
+                        logger.error(f"🔴 SWING LOW BROKEN: Price {close_price:.2f} below swing low {swing_low.price:.2f}")
+            elif direction == "down":
+                # Downward breakout failure - check if swing high broken
+                if instrument in self.swing_highs:
+                    swing_high = self.swing_highs[instrument]
+                    if close_price > swing_high.price:
+                        swing_high.is_broken = True
+                        swing_high_broken = True
+                        previous_swing_high = swing_high.price
+                        logger.warning(f"🟢 SWING HIGH BROKEN: Price {close_price:.2f} above swing high {swing_high.price:.2f}")
             
             alert = BreakoutFailureAlert(
                 instrument=instrument,
@@ -202,10 +256,13 @@ class BreakoutFailureDetector:
                 breakout_price=self.breakout_prices[instrument],
                 breakdown_price=close_price,
                 previous_swing_low=previous_swing_low,
+                previous_swing_high=previous_swing_high,
                 swing_low_broken=swing_low_broken,
+                swing_high_broken=swing_high_broken,
                 breakdown_time=current_candle.get('timestamp', datetime.now()),
                 candles_for_failure=candles_for_failure,
-                volume_spike=volume_spike
+                volume_spike=volume_spike,
+                direction="up_failure" if direction == "up" else "down_failure"
             )
             
             # Store failure
@@ -213,12 +270,16 @@ class BreakoutFailureDetector:
                 self.failure_history[instrument] = []
             self.failure_history[instrument].append(alert)
             
-            self.current_phase[instrument] = BreakoutPhase.BREAKOUT_FAILURE
+            if direction == "up":
+                self.current_phase[instrument] = BreakoutPhase.BREAKOUT_FAILURE_UP
+                if swing_low_broken:
+                    self.current_phase[instrument] = BreakoutPhase.SWING_LOW_BROKEN
+            else:
+                self.current_phase[instrument] = BreakoutPhase.BREAKOUT_FAILURE_DOWN
+                if swing_high_broken:
+                    self.current_phase[instrument] = BreakoutPhase.SWING_HIGH_BROKEN
             
-            if swing_low_broken:
-                self.current_phase[instrument] = BreakoutPhase.SWING_LOW_BROKEN
-            
-            logger.error(f"🔴 BREAKOUT FAILURE DETECTED: {instrument} broke down from {range_level.upper_bound:.2f} to {close_price:.2f}")
+            logger.error(f"🔴 BREAKOUT FAILURE DETECTED: {instrument} ({'up' if direction == 'up' else 'down'}) breakout failed")
             
             return alert
         
@@ -242,6 +303,25 @@ class BreakoutFailureDetector:
         
         self.swing_lows[instrument] = swing_low
         logger.info(f"📉 Swing low updated: {instrument} at {swing_low.price:.2f}")
+    
+    def update_swing_high(self, instrument: str, price_data: List[Dict[str, Any]]):
+        """Update previous swing high"""
+        if len(price_data) < 10:
+            return
+        
+        # Find highest point in recent history (swing high)
+        recent = price_data[-30:]  # Look back 30 candles
+        highs = [(c.get('high', 0), c.get('timestamp', datetime.now())) for c in recent]
+        highest = max(highs, key=lambda x: x[0])
+        
+        swing_high = SwingHigh(
+            price=highest[0],
+            time=highest[1],
+            is_broken=False
+        )
+        
+        self.swing_highs[instrument] = swing_high
+        logger.info(f"📈 Swing high updated: {instrument} at {swing_high.price:.2f}")
     
     def process_candle(self, instrument: str, current_candle: Dict[str, Any]) -> Optional[BreakoutFailureAlert]:
         """
@@ -267,9 +347,10 @@ class BreakoutFailureDetector:
         if len(self.price_history[instrument]) > 200:
             self.price_history[instrument] = self.price_history[instrument][-200:]
         
-        # Update swing low periodically
+        # Update swing low and swing high periodically
         if len(self.price_history[instrument]) > 30 and len(self.price_history[instrument]) % 10 == 0:
             self.update_swing_low(instrument, self.price_history[instrument])
+            self.update_swing_high(instrument, self.price_history[instrument])
         
         # Check current phase
         phase = self.current_phase.get(instrument, BreakoutPhase.CONSOLIDATION)
@@ -287,8 +368,8 @@ class BreakoutFailureDetector:
             if self.detect_breakout(instrument, current_candle, range_level):
                 return None  # Breakout detected, wait for breakdown
         
-        # Phase 3: Detect breakdown after breakout
-        if phase == BreakoutPhase.BREAKOUT and instrument in self.range_levels:
+        # Phase 3: Detect breakdown after breakout (both up and down breakouts)
+        if phase in [BreakoutPhase.BREAKOUT_UP, BreakoutPhase.BREAKOUT_DOWN] and instrument in self.range_levels:
             range_level = self.range_levels[instrument]
             alert = self.detect_breakdown_after_breakout(instrument, current_candle, range_level)
             
