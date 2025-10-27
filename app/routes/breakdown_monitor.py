@@ -8,17 +8,22 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from datetime import datetime
+import logging
 
 from database.connection import get_db
 from app.services.breakdown_detector import BreakdownDetector, SupportLevel, BreakdownAlert
 from app.services.telegram_notifier import TelegramNotifier
 from app.services.market_data_fetcher import MarketDataFetcher
+from app.services.momentum_entry_detector import MomentumEntryDetector
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/breakdown", tags=["Breakdown Monitor"])
 
 # Global services
 detector = BreakdownDetector()
+momentum_detector = MomentumEntryDetector()
 notifier = TelegramNotifier(
     bot_token=getattr(settings, 'TELEGRAM_BOT_TOKEN', None),
     chat_id=getattr(settings, 'TELEGRAM_CHAT_ID', None)
@@ -147,8 +152,32 @@ async def monitor_instrument(instrument: str, notify: bool = True):
                 breakdown = detector.update_price(instrument, latest_candle)
                 
                 if breakdown and notify:
-                    # Send Telegram alert
-                    notifier.send_breakdown_alert(breakdown)
+                    # Get recent red candles for breakdown level marking
+                    recent_candles = ohlc_data[-3:] if len(ohlc_data) >= 3 else ohlc_data
+                    red_candles = [c for c in recent_candles if c.get('close', 0) < c.get('open', 0)]
+                    
+                    # Calculate momentum entry point in opposite side
+                    entry_info = None
+                    if len(red_candles) >= 2:
+                        try:
+                            # Get opposite instrument (CE <-> PE)
+                            opposite_instrument = momentum_detector.get_opposite_instrument(instrument)
+                            
+                            # Fetch opposite side data
+                            opposite_ohlc = await data_fetcher.get_ohlc_data(opposite_instrument, "1m", 50)
+                            
+                            if opposite_ohlc:
+                                entry_info = momentum_detector.calculate_entry_point(
+                                    instrument,
+                                    opposite_ohlc,
+                                    breakdown.breakdown_time,
+                                    red_candles
+                                )
+                        except Exception as e:
+                            logger.error(f"Error calculating momentum entry: {e}")
+                    
+                    # Send Telegram alert with momentum entry info
+                    notifier.send_breakdown_alert_with_momentum(breakdown, entry_info)
                     
                     # Store breakdown
                     if instrument not in detector.breakdown_history:

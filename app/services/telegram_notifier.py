@@ -7,7 +7,6 @@ import requests
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
-# Import handled dynamically
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +67,34 @@ class TelegramNotifier:
             return False
         
         message = self._format_breakout_failure_alert(alert)
+        return self.send_message(message)
+    
+    def send_breakdown_alert_with_momentum(self, breakdown_alert, entry_info: Optional[Dict[str, Any]] = None) -> bool:
+        """Send breakdown alert with momentum entry point"""
+        if not self.api_url or not self.chat_id:
+            logger.warning("Telegram not configured, skipping breakdown alert")
+            return False
+        
+        message = self._format_breakdown_alert(breakdown_alert)
+        
+        # Add momentum entry info if available
+        if entry_info:
+            momentum_msg = f"""
+
+🎯 *MOMENTUM ENTRY DETECTED*
+
+*Opposite Side:*
+• Instrument: {entry_info['opposite_instrument']}
+• Entry Point: ₹{entry_info['entry_point']:.2f}
+• Momentum Candles: {entry_info['momentum_candles_count']}
+• Breakdown Level (Orig): ₹{entry_info['breakdown_level']:.2f}
+
+*Signal:* {entry_info['signal']}
+*Time:* {entry_info['entry_time']}
+
+_Entry point calculated from momentum candles!_"""
+            message = message + momentum_msg
+        
         return self.send_message(message)
     
     def _format_breakdown_alert(self, alert) -> str:
