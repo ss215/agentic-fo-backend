@@ -17,12 +17,17 @@ from app.services.breakout_failure_detector import (
 )
 from app.services.telegram_notifier import TelegramNotifier
 from app.services.market_data_fetcher import MarketDataFetcher
+from app.services.momentum_entry_detector import MomentumEntryDetector
 from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/breakout-failure", tags=["Breakout Failure Monitor"])
 
-# Global service
+# Global services
 detector = BreakoutFailureDetector()
+momentum_detector = MomentumEntryDetector()
 notifier = TelegramNotifier(
     bot_token=getattr(settings, 'TELEGRAM_BOT_TOKEN', None),
     chat_id=getattr(settings, 'TELEGRAM_CHAT_ID', None)
@@ -148,8 +153,43 @@ async def monitor_instrument(instrument: str, notify: bool = True):
                 failure_alert = detector.process_candle(instrument, latest_candle)
                 
                 if failure_alert and notify:
-                    # Send Telegram alert
-                    notifier.send_breakout_failure_alert(failure_alert)
+                    # Get opposite instrument (CE <-> PE)
+                    opposite_instrument = momentum_detector.get_opposite_instrument(instrument)
+                    
+                    # Calculate momentum entry point in opposite side
+                    entry_info = None
+                    try:
+                        # Get recent candles for breakdown level marking
+                        recent_candles = ohlc_data[-5:] if len(ohlc_data) >= 5 else ohlc_data
+                        
+                        # Identify the breakdown/failure candles
+                        # For breakout failure: these would be the candles that reversed after breakout
+                        failure_candles = []
+                        for candle in recent_candles:
+                            open_price = candle.get('open', 0)
+                            close_price = candle.get('close', 0)
+                            # Red candles for up failure, green for down failure
+                            if failure_alert.direction == "up_failure" and close_price < open_price:
+                                failure_candles.append(candle)
+                            elif failure_alert.direction == "down_failure" and close_price > open_price:
+                                failure_candles.append(candle)
+                        
+                        if len(failure_candles) >= 2:
+                            # Fetch opposite side data
+                            opposite_ohlc = await data_fetcher.get_ohlc_data(opposite_instrument, "1m", 50)
+                            
+                            if opposite_ohlc:
+                                entry_info = momentum_detector.calculate_entry_point(
+                                    instrument,
+                                    opposite_ohlc,
+                                    failure_alert.breakdown_time,
+                                    failure_candles
+                                )
+                    except Exception as e:
+                        logger.error(f"Error calculating momentum entry for breakout failure: {e}")
+                    
+                    # Send Telegram alert with momentum entry info
+                    notifier.send_breakout_failure_alert_with_momentum(failure_alert, entry_info)
             
             # Wait 1 minute before next check
             await asyncio.sleep(60)
