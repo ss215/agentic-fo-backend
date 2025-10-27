@@ -122,22 +122,29 @@ class MomentumEntryDetector:
             logger.warning(f"Insufficient momentum candles for {opposite_instrument}")
             return None
         
-        # Check if these are green/momentum candles (CE breakdown -> PE momentum, PE breakdown -> CE momentum)
-        momentum_green_candles = []
+        # Determine which type of candles to look for based on breakdown direction
+        # If CE breaks down, PE gets momentum (green candles)
+        # If PE breaks down, CE gets momentum (green candles)
+        breakdown_asset = breakdown_instrument.split()[-1]  # "CE" or "PE"
+        opposite_asset = opposite_instrument.split()[-1]   # "CE" or "PE"
+        
+        # For breakdown in CE/PE, we expect momentum in opposite side
+        # Momentum = green candles (bullish)
+        momentum_candles_to_use = []
         for candle in momentum_candles:
             open_price = candle.get('open', 0)
             close_price = candle.get('close', 0)
             
             # Green candle = bullish momentum
             if close_price > open_price:
-                momentum_green_candles.append(candle)
+                momentum_candles_to_use.append(candle)
         
-        if len(momentum_green_candles) < 2:
-            logger.info(f"No clear momentum detected in {opposite_instrument}")
+        if len(momentum_candles_to_use) < 2:
+            logger.info(f"No clear momentum (green candles) detected in {opposite_instrument}")
             return None
         
         # Calculate average of lows from momentum candles
-        lows = [candle.get('low', 0) for candle in momentum_green_candles]
+        lows = [candle.get('low', 0) for candle in momentum_candles_to_use]
         entry_point = sum(lows) / len(lows)
         
         # Get breakdown level from original instrument
@@ -147,16 +154,16 @@ class MomentumEntryDetector:
             asset=opposite_instrument.split()[-1],  # "CE" or "PE"
             strike=strike,
             breakdown_level=breakdown_level,
-            momentum_candles=momentum_green_candles,
+            momentum_candles=momentum_candles_to_use,
             entry_point=entry_point,
             entry_time=momentum_candles[-1].get('timestamp', datetime.now()),
-            red_candles_count=len(momentum_green_candles)
+            red_candles_count=len(momentum_candles_to_use)
         )
         
         logger.warning(f"🎯 MOMENTUM DETECTED: {opposite_instrument}")
         logger.info(f"   Breakdown in: {breakdown_instrument} at ₹{breakdown_level:.2f}")
         logger.info(f"   Momentum in: {opposite_instrument} at ₹{entry_point:.2f}")
-        logger.info(f"   Entry Point: ₹{entry_point:.2f} (average of {len(momentum_green_candles)} green candles)")
+        logger.info(f"   Entry Point: ₹{entry_point:.2f} (average of {len(momentum_candles_to_use)} momentum candles)")
         
         return momentum_level
     
